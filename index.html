@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EXIF Timeline</title>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>EXIF Timeline</h1>
+        <div id="connection-bar">
+          <input type="text" id="api-key" placeholder="Immich API Key" />
+          <button id="connect-btn">Connect</button>
+          <span id="connection-status"></span>
+        </div>
+      </header>
+
+      <div id="album-bar" class="hidden">
+        <label for="album-select">Album:</label>
+        <select id="album-select">
+          <option value="">Select an album...</option>
+        </select>
+        <span id="asset-count"></span>
+      </div>
+
+      <div id="timeline-container" class="hidden">
+        <div id="timeline-grid"></div>
+      </div>
+
+      <div id="slider-modal" class="hidden">
+        <div id="slider-backdrop"></div>
+        <div id="slider-content">
+          <h2>Adjust Timestamp</h2>
+          <div id="slider-photos">
+            <div id="slider-before" class="slider-photo">
+              <img id="slider-before-img" alt="Before" />
+              <span id="slider-before-time"></span>
+            </div>
+            <div id="slider-target" class="slider-photo target">
+              <img id="slider-target-img" alt="Moving" />
+              <span id="slider-target-time"></span>
+            </div>
+            <div id="slider-after" class="slider-photo">
+              <img id="slider-after-img" alt="After" />
+              <span id="slider-after-time"></span>
+            </div>
+          </div>
+          <div id="slider-control">
+            <span id="slider-min-label"></span>
+            <input type="range" id="timestamp-slider" min="0" max="1000" value="500" />
+            <span id="slider-max-label"></span>
+          </div>
+          <div id="slider-result">
+            <strong>New timestamp:</strong> <span id="new-timestamp-display"></span>
+          </div>
+          <div id="slider-buttons">
+            <button id="slider-cancel">Cancel</button>
+            <button id="slider-apply">Apply</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
