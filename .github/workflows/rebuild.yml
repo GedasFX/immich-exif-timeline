@@ -1,0 +1,22 @@
+## Weekly cron rebuild — same workflow as build.yml, fresh apt + pip
+## packages baked in. Source SHA stays the same; the date in the
+## immutable tag changes, so each rebuild produces a unique
+## :0.3-<sha>-YYYYMMDD artifact that Watchtower can pull.
+
+name: rebuild
+
+on:
+  schedule:
+    # Sunday 04:00 UTC. One hour after docker-backup's rebuild so
+    # registry pressure stays staggered.
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  rebuild:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit

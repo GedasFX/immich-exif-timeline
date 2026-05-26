@@ -1,0 +1,101 @@
+## Build + publish to ghcr.io/<owner>/exif-timeline.
+##
+## Triggers:
+##   push to main      → build, scan, push every tag
+##   pull_request      → build + scan; do NOT push
+##   workflow_call     → invoked by rebuild.yml on cron
+##   workflow_dispatch → manual trigger from the Actions UI
+##
+## Tag scheme:
+##   :latest                          — bleeding edge
+##   :0                               — current major
+##   :0.0                             — current minor (recommended pin
+##                                      for Watchtower-managed services)
+##   :0.0-<short-sha>-<YYYYMMDD>      — immutable build artifact
+
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      ## Extract version metadata from package.json + git so the tag
+      ## scheme is reproducible.
+      - id: meta
+        run: |
+          version=$(node -p "require('./package.json').version")
+          minor=$(echo "$version" | cut -d. -f1,2)
+          major=$(echo "$version" | cut -d. -f1)
+          sha=$(git rev-parse --short=7 HEAD)
+          date=$(date -u +%Y%m%d)
+          {
+            echo "version=$version"
+            echo "minor=$minor"
+            echo "major=$major"
+            echo "sha=$sha"
+            echo "date=$date"
+            echo "owner_lc=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      ## Build locally first so Trivy can scan before we push.
+      ## pull: true forces fresh base images so weekly cron rebuilds
+      ## actually pick up security patches in node:22-alpine + nginx:alpine.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          pull: true
+          tags: exif-timeline:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ steps.meta.outputs.date }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.sha }}-${{ steps.meta.outputs.date }}
+            org.opencontainers.image.licenses=MIT
+
+      - uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: exif-timeline:scan
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true     # don't block on CVEs without an upstream fix
+          vuln-type: os,library
+
+      - name: tag + push
+        if: github.event_name != 'pull_request'
+        run: |
+          base=ghcr.io/${{ steps.meta.outputs.owner_lc }}/exif-timeline
+          v=${{ steps.meta.outputs.version }}
+          mi=${{ steps.meta.outputs.minor }}
+          ma=${{ steps.meta.outputs.major }}
+          s=${{ steps.meta.outputs.sha }}
+          d=${{ steps.meta.outputs.date }}
+          for t in latest "$ma" "$mi" "$mi-$s-$d"; do
+            docker tag exif-timeline:scan "$base:$t"
+            docker push "$base:$t"
+            echo "pushed $base:$t"
+          done
