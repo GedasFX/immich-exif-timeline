@@ -1,6 +1,8 @@
 import { ImmichApi } from './immich-api';
 import type { Asset } from './immich-api';
 import { showSliderModal } from './slider';
+// @ts-expect-error: tz-lookup has no types
+import tzlookup from 'tz-lookup';
 
 let api: ImmichApi;
 let assets: Asset[] = [];
@@ -33,6 +35,50 @@ function saveTzPreference() {
   localStorage.setItem('filename-tzs', JSON.stringify(activeTimezones));
 }
 
+/** Resolve GPS coords to IANA timezone name (e.g. "America/New_York"). */
+function getTzNameFromCoords(lat: number, lon: number): string | null {
+  try {
+    return tzlookup(lat, lon) as string;
+  } catch {
+    return null;
+  }
+}
+
+/** Compute the UTC offset string ("+HH:MM") for an IANA timezone at a given moment.
+ *  Accounts for DST since the offset varies across the year. */
+function getOffsetForTzAt(tzName: string, atDate: Date): string | null {
+  try {
+    const fmt = new Intl.DateTimeFormat('en', { timeZone: tzName, timeZoneName: 'longOffset' });
+    const part = fmt.formatToParts(atDate).find(p => p.type === 'timeZoneName');
+    if (!part) return null;
+    // part.value is "GMT+02:00", "GMT-05:00", or "GMT" for UTC
+    if (part.value === 'GMT') return '+00:00';
+    const match = part.value.match(/GMT([+-])(\d{1,2}):?(\d{2})?/);
+    if (!match) return null;
+    const sign = match[1];
+    const hh = match[2].padStart(2, '0');
+    const mm = (match[3] ?? '00').padStart(2, '0');
+    return `${sign}${hh}:${mm}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Get the GPS-derived timezone offset for an asset at its filename's parsed time. */
+function getGpsTimezoneForAsset(asset: Asset, atDate: Date): { name: string; offset: string } | null {
+  const lat = asset.exifInfo?.latitude;
+  const lon = asset.exifInfo?.longitude;
+  if (lat == null || lon == null) return null;
+
+  const name = getTzNameFromCoords(lat, lon);
+  if (!name) return null;
+
+  const offset = getOffsetForTzAt(name, atDate);
+  if (!offset) return null;
+
+  return { name, offset };
+}
+
 function makeDateWithOffset(year: number, month: number, day: number, hour: number, min: number, sec: number, offset: string): Date {
   const pad = (n: number) => String(n).padStart(2, '0');
   const iso = `${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(min)}:${pad(sec)}${offset}`;
@@ -56,8 +102,8 @@ function extractFilenameParts(filename: string): [number, number, number, number
   return null;
 }
 
-/** Check if filename timestamp disagrees with EXIF across all active timezones.
- *  Returns the suggested Date (using first timezone) if none match, or null if any match. */
+/** Check if filename timestamp disagrees with EXIF across all candidate timezones.
+ *  Returns the suggested Date (preferring GPS-derived tz) if none match, or null if any match. */
 function getFilenameMismatch(asset: Asset): Date | null {
   const parts = extractFilenameParts(asset.originalFileName);
   if (!parts) return null;
@@ -65,21 +111,29 @@ function getFilenameMismatch(asset: Asset): Date | null {
   const exifDt = asset.exifInfo?.dateTimeOriginal;
   const exifTime = exifDt ? new Date(exifDt).getTime() : null;
 
-  const tzs = activeTimezones.length > 0 ? activeTimezones : [getLocalTzOffset()];
+  // Build candidate timezones: GPS-derived (if any), then active timezones.
+  // For GPS resolution we need a date — use UTC interpretation as a rough seed.
+  const seedDate = makeDateWithOffset(...parts, '+00:00');
+  const gpsTz = !isNaN(seedDate.getTime()) ? getGpsTimezoneForAsset(asset, seedDate) : null;
 
-  // If any timezone interpretation matches EXIF within 60s, no mismatch
-  for (const tz of tzs) {
+  const candidates: string[] = [];
+  if (gpsTz) candidates.push(gpsTz.offset);
+  for (const tz of (activeTimezones.length > 0 ? activeTimezones : [getLocalTzOffset()])) {
+    if (!candidates.includes(tz)) candidates.push(tz);
+  }
+
+  // If any candidate interpretation matches EXIF within 60s, no mismatch
+  for (const tz of candidates) {
     const d = makeDateWithOffset(...parts, tz);
     if (!isNaN(d.getTime()) && exifTime !== null) {
       if (Math.abs(d.getTime() - exifTime) <= 60_000) return null;
     }
   }
 
-  // No match — suggest using the first timezone
-  const suggested = makeDateWithOffset(...parts, tzs[0]);
+  // No match — suggest using the first candidate (GPS tz preferred)
+  const suggested = makeDateWithOffset(...parts, candidates[0]);
   if (isNaN(suggested.getTime())) return null;
 
-  // If no EXIF at all, or mismatch in all timezones
   return suggested;
 }
 
@@ -244,14 +298,20 @@ function updateAutofixButton() {
 }
 
 async function autofixSelected() {
-  // Use last quickfix tz, or first active tz
-  const tz = lastQuickfixTz || localStorage.getItem('quickfix-last-tz') || activeTimezones[0] || getLocalTzOffset();
+  // Fallback timezone if GPS isn't available for a given asset
+  const fallbackTz = lastQuickfixTz || localStorage.getItem('quickfix-last-tz') || activeTimezones[0] || getLocalTzOffset();
 
   const mismatches: { asset: Asset; date: Date }[] = [];
   for (const i of selected) {
     const asset = assets[i];
     const parts = extractFilenameParts(asset.originalFileName);
     if (!parts) continue;
+
+    // Prefer GPS-derived timezone, fallback to last manual choice
+    const seed = makeDateWithOffset(...parts, '+00:00');
+    const gpsTz = !isNaN(seed.getTime()) ? getGpsTimezoneForAsset(asset, seed) : null;
+    const tz = gpsTz ? gpsTz.offset : fallbackTz;
+
     const d = makeDateWithOffset(...parts, tz);
     if (isNaN(d.getTime())) continue;
 
@@ -276,7 +336,7 @@ async function autofixSelected() {
       if (asset.exifInfo) {
         asset.exifInfo.dateTimeOriginal = newTime;
       } else {
-        asset.exifInfo = { dateTimeOriginal: newTime, make: null, model: null };
+        asset.exifInfo = { dateTimeOriginal: newTime, make: null, model: null, latitude: null, longitude: null };
       }
     } catch (err) {
       alert(`Failed on ${asset.originalFileName}: ${err}`);
@@ -369,15 +429,21 @@ function showQuickfixModal(asset: Asset) {
   const exifDt = asset.exifInfo?.dateTimeOriginal;
   currentEl.textContent = exifDt ? `Current EXIF: ${formatDateTime(exifDt)}` : 'No EXIF timestamp';
 
-  // Build timezone options: UTC + all active timezones, deduplicated
+  // Determine GPS-derived timezone (if image has coords)
+  const seedDate = makeDateWithOffset(...parts, '+00:00');
+  const gpsTz = !isNaN(seedDate.getTime()) ? getGpsTimezoneForAsset(asset, seedDate) : null;
+
+  // Build timezone options: GPS (if any), UTC, all active timezones — deduplicated
   const tzOptions = new Set<string>();
-  tzOptions.add('+00:00'); // UTC always available
+  if (gpsTz) tzOptions.add(gpsTz.offset);
+  tzOptions.add('+00:00');
   for (const tz of activeTimezones) tzOptions.add(tz);
 
-  // Put last used timezone first if it exists
+  // Put last used timezone first (unless GPS-derived takes precedence)
   const savedLastTz = lastQuickfixTz || localStorage.getItem('quickfix-last-tz');
   const orderedTzs: string[] = [];
-  if (savedLastTz && tzOptions.has(savedLastTz)) {
+  if (gpsTz) orderedTzs.push(gpsTz.offset);
+  if (savedLastTz && tzOptions.has(savedLastTz) && !orderedTzs.includes(savedLastTz)) {
     orderedTzs.push(savedLastTz);
   }
   for (const tz of tzOptions) {
@@ -391,11 +457,13 @@ function showQuickfixModal(asset: Asset) {
 
     const btn = document.createElement('button');
     btn.className = 'quickfix-option';
-    if (tz === savedLastTz) btn.classList.add('quickfix-option-last');
+    const isGps = gpsTz && tz === gpsTz.offset;
+    if (isGps) btn.classList.add('quickfix-option-gps');
+    else if (tz === savedLastTz) btn.classList.add('quickfix-option-last');
 
     const tzLabel = document.createElement('span');
     tzLabel.className = 'quickfix-tz';
-    tzLabel.textContent = `UTC${tz}`;
+    tzLabel.textContent = isGps ? `\u{1F4CD} ${gpsTz!.name} (UTC${tz})` : `UTC${tz}`;
 
     const timeLabel = document.createElement('span');
     timeLabel.className = 'quickfix-time';
@@ -417,7 +485,7 @@ function showQuickfixModal(asset: Asset) {
         if (asset.exifInfo) {
           asset.exifInfo.dateTimeOriginal = newTime;
         } else {
-          asset.exifInfo = { dateTimeOriginal: newTime, make: null, model: null };
+          asset.exifInfo = { dateTimeOriginal: newTime, make: null, model: null, latitude: null, longitude: null };
         }
         resortAssets();
         cleanup();

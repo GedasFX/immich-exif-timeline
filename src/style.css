@@ -636,6 +636,16 @@ button {
   border-color: #f59e0b;
 }
 
+.quickfix-option-gps {
+  border-color: #10b981;
+  background: #1a2e2a;
+}
+
+.quickfix-option-gps:hover {
+  background: #1e3a35;
+  border-color: #34d399;
+}
+
 .quickfix-option[disabled] {
   opacity: 0.6;
   cursor: not-allowed;

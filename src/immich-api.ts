@@ -13,6 +13,8 @@ export interface ExifInfo {
   dateTimeOriginal: string | null;
   make: string | null;
   model: string | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export interface Asset {

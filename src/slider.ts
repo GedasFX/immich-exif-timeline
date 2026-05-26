@@ -143,7 +143,7 @@ export function showSliderModal(
         if (asset.exifInfo) {
           asset.exifInfo.dateTimeOriginal = newTime;
         } else {
-          asset.exifInfo = { dateTimeOriginal: newTime, make: null, model: null };
+          asset.exifInfo = { dateTimeOriginal: newTime, make: null, model: null, latitude: null, longitude: null };
         }
 
         if (isMulti) {
