@@ -10,7 +10,7 @@
       <header>
         <h1>EXIF Timeline</h1>
         <div id="connection-bar">
-          <input type="text" id="api-key" placeholder="Immich API Key" />
+          <input type="password" id="api-key" placeholder="Immich API Key" />
           <button id="connect-btn">Connect</button>
           <span id="connection-status"></span>
         </div>
@@ -22,6 +22,14 @@
           <option value="">Select an album...</option>
         </select>
         <span id="asset-count"></span>
+        <div id="tz-picker">
+          <label id="tz-label">Filename TZ:</label>
+          <div id="tz-chips"></div>
+          <select id="tz-add-select">
+            <option value="">+ Add...</option>
+          </select>
+        </div>
+        <button id="autofix-all-btn" class="hidden">Autofix All</button>
       </div>
 
       <div id="timeline-container" class="hidden">
@@ -57,6 +65,18 @@
           <div id="slider-buttons">
             <button id="slider-cancel">Cancel</button>
             <button id="slider-apply">Apply</button>
+          </div>
+        </div>
+      </div>
+      <div id="quickfix-modal" class="hidden">
+        <div id="quickfix-backdrop"></div>
+        <div id="quickfix-content">
+          <h2>Quick Fix Timestamp</h2>
+          <div id="quickfix-filename"></div>
+          <div id="quickfix-current"></div>
+          <div id="quickfix-options"></div>
+          <div id="quickfix-buttons">
+            <button id="quickfix-cancel">Cancel</button>
           </div>
         </div>
       </div>
