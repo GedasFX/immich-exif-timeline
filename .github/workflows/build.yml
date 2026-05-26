@@ -1,4 +1,4 @@
-## Build + publish to ghcr.io/<owner>/exif-timeline.
+## Build + publish to ghcr.io/<owner>/immich-exif-timeline.
 ##
 ## Triggers:
 ##   push to main      → build, scan, push every tag
@@ -67,7 +67,7 @@ jobs:
           context: .
           load: true
           pull: true
-          tags: exif-timeline:scan
+          tags: immich-exif-timeline:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
           labels: |
@@ -79,7 +79,7 @@ jobs:
 
       - uses: aquasecurity/trivy-action@master
         with:
-          image-ref: exif-timeline:scan
+          image-ref: immich-exif-timeline:scan
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true     # don't block on CVEs without an upstream fix
@@ -88,14 +88,14 @@ jobs:
       - name: tag + push
         if: github.event_name != 'pull_request'
         run: |
-          base=ghcr.io/${{ steps.meta.outputs.owner_lc }}/exif-timeline
+          base=ghcr.io/${{ steps.meta.outputs.owner_lc }}/immich-exif-timeline
           v=${{ steps.meta.outputs.version }}
           mi=${{ steps.meta.outputs.minor }}
           ma=${{ steps.meta.outputs.major }}
           s=${{ steps.meta.outputs.sha }}
           d=${{ steps.meta.outputs.date }}
           for t in latest "$ma" "$mi" "$mi-$s-$d"; do
-            docker tag exif-timeline:scan "$base:$t"
+            docker tag immich-exif-timeline:scan "$base:$t"
             docker push "$base:$t"
             echo "pushed $base:$t"
           done
